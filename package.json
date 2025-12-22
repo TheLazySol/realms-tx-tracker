@@ -1,5 +1,5 @@
 {
-  "name": "dao-reimbursement-tracker",
+  "name": "realms-fee-tracker",
   "version": "1.0.0",
   "description": "Track transaction fees paid by a user for a specific Realm/DAO over a period of time. Great for knowing how much SOL was spent proposing, voting, and commenting.",
   "main": "dist/index.js",

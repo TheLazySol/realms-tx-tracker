@@ -16,7 +16,7 @@ Track transaction fees paid by a wallet for a specific Solana DAO/Realm. This to
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd dao-reimbursement-tracker
+cd realms-fee-tracker
 
 # Install dependencies
 pnpm install
