@@ -1,0 +1,33 @@
+{
+  "name": "dao-reimbursement-tracker",
+  "version": "1.0.0",
+  "description": "Track transaction fees paid by a user for a specific Realm/DAO over a period of time. Great for knowing how much SOL was spent proposing, voting, and commenting.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "tsc && node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "keywords": [
+    "solana",
+    "dao",
+    "governance",
+    "realms",
+    "spl-governance",
+    "transaction-tracker"
+  ],
+  "author": "",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "@solana/web3.js": "^1.95.0",
+    "governance-idl-sdk": "^0.0.4",
+    "csv-writer": "^1.6.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3",
+    "ts-node": "^10.9.2"
+  }
+}
