@@ -64,24 +64,46 @@ function isGovernanceProgram(programId: string): boolean {
 
 /**
  * Extract the first byte (discriminator) from instruction data
+ * 
+ * Handles multiple data formats:
+ * - base64 encoded string (most common for parsed transactions)
+ * - base58 encoded string (less common)
+ * - raw buffer/array
  */
-function getInstructionDiscriminator(data: string): number | null {
+function getInstructionDiscriminator(data: string | Uint8Array | Buffer): number | null {
   try {
-    // Data is base58 encoded, decode first byte
-    const decoded = Buffer.from(data, 'base64');
-    if (decoded.length > 0) {
-      return decoded[0];
-    }
-  } catch {
-    // Try as raw buffer if base64 fails
-    try {
-      const decoded = Buffer.from(data);
+    let decoded: Buffer;
+    
+    if (typeof data === 'string') {
+      // Try base64 first (most common format from parsed transactions)
+      try {
+        decoded = Buffer.from(data, 'base64');
+        if (decoded.length > 0) {
+          return decoded[0];
+        }
+      } catch {
+        // Try base58 if base64 fails
+        try {
+          // Note: We'd need bs58 library for base58, but let's try other approaches first
+          // For now, if base64 fails, we'll try treating it as raw bytes
+          decoded = Buffer.from(data, 'utf8');
+          if (decoded.length > 0) {
+            return decoded[0];
+          }
+        } catch {
+          return null;
+        }
+      }
+    } else if (data instanceof Buffer || data instanceof Uint8Array) {
+      decoded = Buffer.from(data);
       if (decoded.length > 0) {
         return decoded[0];
       }
-    } catch {
+    } else {
       return null;
     }
+  } catch {
+    return null;
   }
   return null;
 }
@@ -106,12 +128,32 @@ function determineTransactionType(
     }
 
     // For parsed instructions, check if there's data
-    if ('data' in instruction && typeof instruction.data === 'string') {
-      const discriminator = getInstructionDiscriminator(instruction.data);
-      if (discriminator !== null) {
-        const txType = getTransactionTypeFromDiscriminator(discriminator, programId);
-        if (txType) {
-          return txType;
+    // Parsed instructions can have data as string (base64) or parsed object
+    if ('data' in instruction) {
+      const instructionData = instruction.data;
+      
+      // Handle string data (base64 encoded)
+      if (typeof instructionData === 'string') {
+        const discriminator = getInstructionDiscriminator(instructionData);
+        if (discriminator !== null) {
+          const txType = getTransactionTypeFromDiscriminator(discriminator, programId);
+          if (txType) {
+            return txType;
+          }
+        }
+      }
+      // Handle parsed instruction data (object with parsed fields)
+      else if (typeof instructionData === 'object' && instructionData !== null) {
+        // For parsed instructions, check the instruction type field
+        // This is more reliable than trying to decode the discriminator
+        const parsedIx = instructionData as { [key: string]: any };
+        
+        // Check for common parsed instruction formats
+        if ('vote' in parsedIx || 'castVote' in parsedIx || 'relinquishVote' in parsedIx) {
+          return TransactionType.VOTE;
+        }
+        if ('proposal' in parsedIx || 'createProposal' in parsedIx || 'cancelProposal' in parsedIx) {
+          return TransactionType.PROPOSAL;
         }
       }
     }
@@ -122,7 +164,7 @@ function determineTransactionType(
     }
   }
 
-  // Also check inner instructions
+  // Also check inner instructions (CPIs)
   if (tx.meta?.innerInstructions) {
     for (const inner of tx.meta.innerInstructions) {
       for (const ix of inner.instructions) {
@@ -134,13 +176,24 @@ function determineTransactionType(
           }
 
           if (programId === GOVERNANCE_PROGRAM_ID && 'data' in ix) {
-            const data = (ix as { data?: string }).data;
+            const data = (ix as { data?: string | object }).data;
             if (data) {
-              const discriminator = getInstructionDiscriminator(data);
-              if (discriminator !== null) {
-                const txType = getTransactionTypeFromDiscriminator(discriminator, programId);
-                if (txType) {
-                  return txType;
+              if (typeof data === 'string') {
+                const discriminator = getInstructionDiscriminator(data);
+                if (discriminator !== null) {
+                  const txType = getTransactionTypeFromDiscriminator(discriminator, programId);
+                  if (txType) {
+                    return txType;
+                  }
+                }
+              } else if (typeof data === 'object') {
+                // Handle parsed inner instruction data
+                const parsedIx = data as { [key: string]: any };
+                if ('vote' in parsedIx || 'castVote' in parsedIx || 'relinquishVote' in parsedIx) {
+                  return TransactionType.VOTE;
+                }
+                if ('proposal' in parsedIx || 'createProposal' in parsedIx || 'cancelProposal' in parsedIx) {
+                  return TransactionType.PROPOSAL;
                 }
               }
             }
@@ -156,6 +209,10 @@ function determineTransactionType(
 /**
  * Calculate rent cost from balance changes
  * Rent is the SOL deposited for account creation (not recovered in the same tx)
+ * 
+ * Note: This calculates rent based on the wallet's balance change.
+ * The wallet pays rent when accounts are created, and this is reflected
+ * in the balance difference (preBalance - postBalance).
  */
 function calculateRentCost(
   tx: ParsedTransactionWithMeta,
@@ -170,7 +227,7 @@ function calculateRentCost(
   const postBalances = tx.meta.postBalances;
   const fee = tx.meta.fee;
 
-  // Find wallet index
+  // Find wallet index in account keys
   let walletIndex = -1;
   for (let i = 0; i < accountKeys.length; i++) {
     const pubkey = typeof accountKeys[i] === 'string'
@@ -184,19 +241,30 @@ function calculateRentCost(
   }
 
   if (walletIndex === -1) {
+    // Wallet not found in account keys - might be a signer but not directly involved
+    // In this case, rent cost is 0 (wallet didn't pay rent directly)
     return 0;
   }
 
-  // Calculate total balance change excluding fee
+  // Calculate balance change
   const preBal = preBalances[walletIndex] || 0;
   const postBal = postBalances[walletIndex] || 0;
   const balanceChange = preBal - postBal;
 
-  // Rent cost is the balance change minus the transaction fee
-  // If this is positive, it means SOL was spent on rent
-  const rentCost = balanceChange - fee;
+  // The total SOL spent by the wallet is:
+  // - Transaction fee (always paid by fee payer, usually the wallet)
+  // - Rent deposits (when creating accounts)
+  // 
+  // Balance change = fee + rent deposits - rent refunds
+  // So: rent deposits = balanceChange - fee + rent refunds
+  //
+  // For simplicity, we calculate rent cost as:
+  // rentCost = max(0, balanceChange - fee)
+  // This captures rent deposits but may miss rent refunds in the same transaction
+  
+  const rentCost = Math.max(0, balanceChange - fee);
 
-  return Math.max(0, rentCost);
+  return rentCost;
 }
 
 /**

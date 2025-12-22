@@ -9,7 +9,13 @@ import { PublicKey, ConfirmedSignatureInfo } from '@solana/web3.js';
 import { loadConfig, displayConfig } from './config';
 import { ValidatedConfig, TrackedTransaction, TrackingResults } from './types';
 import { getConnection, fetchSignaturesForAddress, fetchTransactionsBatch } from './services/solana';
-import { parseRealmData, deriveTokenOwnerRecordAddress, tokenOwnerRecordExists } from './services/governance';
+import { throttle } from './utils/rate-limiter';
+import { 
+  parseRealmData, 
+  deriveTokenOwnerRecordAddress, 
+  tokenOwnerRecordExists,
+  fetchVoteRecordsForTokenOwnerRecord
+} from './services/governance';
 import { parseTransaction, lamportsToSol } from './services/transaction-parser';
 import { generateCsvReport, calculateResults } from './utils/csv-generator';
 import { MAX_CONCURRENT_REQUESTS, LAMPORTS_PER_SOL } from './constants';
@@ -96,13 +102,14 @@ async function main(): Promise<void> {
     logSeparator();
 
     // Step 4: Fetch transaction signatures from multiple sources
-    // - TokenOwnerRecord: captures votes and proposals
+    // - TokenOwnerRecord: captures votes and proposals (via account signatures)
+    // - VoteRecord accounts: direct query of vote records (more comprehensive)
     // - Wallet: captures comments (chat program uses wallet directly)
     logInfo('Fetching transaction signatures...');
     
     const walletPubkey = new PublicKey(config.walletAddress);
     
-    // Fetch signatures for TokenOwnerRecord (votes, proposals)
+    // Source 1: Fetch signatures for TokenOwnerRecord (votes, proposals)
     logInfo('  Querying TokenOwnerRecord for votes/proposals...');
     const torSignatures = torExists 
       ? await fetchSignaturesForAddress(
@@ -114,7 +121,45 @@ async function main(): Promise<void> {
       : [];
     logSuccess(`  Found ${torSignatures.length} TokenOwnerRecord transactions`);
     
-    // Fetch signatures for wallet (comments use wallet directly)
+    // Source 2: Query VoteRecord accounts directly (more comprehensive vote discovery)
+    let voteRecordSignatures: ConfirmedSignatureInfo[] = [];
+    if (torExists) {
+      logInfo('  Querying VoteRecord accounts directly...');
+      const voteRecords = await fetchVoteRecordsForTokenOwnerRecord(
+        connection,
+        tokenOwnerRecord,
+        config.startTimestamp,
+        config.endTimestamp
+      );
+      
+      if (voteRecords.length > 0) {
+        // Fetch transaction signatures for each VoteRecord
+        logInfo(`  Fetching transaction signatures for ${voteRecords.length} VoteRecords...`);
+        const voteRecordPubkeys = voteRecords.map(vr => vr.pubkey);
+        
+        // Fetch signatures for each VoteRecord account
+        for (const voteRecordPubkey of voteRecordPubkeys) {
+          await throttle();
+          try {
+            const vrSigs = await fetchSignaturesForAddress(
+              connection,
+              voteRecordPubkey,
+              config.startTimestamp,
+              config.endTimestamp
+            );
+            voteRecordSignatures.push(...vrSigs);
+          } catch (error) {
+            logWarning(`  Failed to fetch signatures for VoteRecord ${voteRecordPubkey.toString()}: ${(error as Error).message}`);
+          }
+        }
+        
+        logSuccess(`  Found ${voteRecordSignatures.length} VoteRecord transactions`);
+      } else {
+        logInfo('  No VoteRecord accounts found');
+      }
+    }
+    
+    // Source 3: Fetch signatures for wallet (comments use wallet directly)
     logInfo('  Querying wallet for comments...');
     const walletSignatures = await fetchSignaturesForAddress(
       connection,
@@ -124,9 +169,17 @@ async function main(): Promise<void> {
     );
     logSuccess(`  Found ${walletSignatures.length} wallet transactions`);
     
-    // Merge and deduplicate
-    const signatures = mergeSignatures(torSignatures, walletSignatures);
+    // Merge and deduplicate all signature sources
+    const signatures = mergeSignatures(torSignatures, voteRecordSignatures, walletSignatures);
     logSuccess(`Total unique transactions: ${signatures.length}`);
+    
+    // Log summary of sources
+    if (signatures.length > 0) {
+      logInfo(`  Transaction sources:`);
+      logInfo(`    - TokenOwnerRecord: ${torSignatures.length}`);
+      logInfo(`    - VoteRecords: ${voteRecordSignatures.length}`);
+      logInfo(`    - Wallet: ${walletSignatures.length}`);
+    }
     
     if (signatures.length === 0) {
       logWarning('No transactions found in the specified date range');
