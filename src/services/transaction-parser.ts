@@ -9,47 +9,70 @@
 import { ParsedTransactionWithMeta } from '@solana/web3.js';
 import {
   TransactionType,
-  TrackedTransaction,
-  GovernanceInstructionType
+  TrackedTransaction
 } from '../types';
 import {
   GOVERNANCE_PROGRAM_ID,
   GOVERNANCE_CHAT_PROGRAM_ID,
+  GOVERNANCE_INSTRUCTION_MAP,
   LAMPORTS_PER_SOL
 } from '../constants';
 import { formatTimestamp } from '../utils/date-utils';
 
 /**
+ * Convert string transaction type from GOVERNANCE_INSTRUCTION_MAP to TransactionType enum
+ */
+function stringToTransactionType(typeString: string): TransactionType {
+  switch (typeString) {
+    case 'Vote':
+      return TransactionType.VOTE;
+    case 'Proposal':
+      return TransactionType.PROPOSAL;
+    case 'Comment':
+      return TransactionType.COMMENT;
+    case 'Token Deposit':
+      return TransactionType.TOKEN_DEPOSIT;
+    case 'Token Withdrawal':
+      return TransactionType.TOKEN_WITHDRAWAL;
+    case 'Delegate':
+      return TransactionType.DELEGATE;
+    case 'Execute Transaction':
+      return TransactionType.EXECUTE;
+    case 'Governance Admin':
+      return TransactionType.GOVERNANCE_ADMIN;
+    case 'Signatory':
+      return TransactionType.SIGNATORY;
+    case 'Proposal Instruction':
+      return TransactionType.PROPOSAL_INSTRUCTION;
+    case 'Refund':
+      return TransactionType.REFUND;
+    default:
+      return TransactionType.OTHER_GOVERNANCE;
+  }
+}
+
+/**
  * Map governance instruction discriminators to transaction types
+ * Uses GOVERNANCE_INSTRUCTION_MAP to cover ALL governance instructions
  */
 function getTransactionTypeFromDiscriminator(
   discriminator: number,
   programId: string
 ): TransactionType | null {
-  // Chat program - PostMessage
+  // Chat program - any instruction is a comment
   if (programId === GOVERNANCE_CHAT_PROGRAM_ID) {
     return TransactionType.COMMENT;
   }
 
-  // Main governance program
+  // Main governance program - use complete mapping
   if (programId === GOVERNANCE_PROGRAM_ID) {
-    switch (discriminator) {
-      // Votes
-      case GovernanceInstructionType.CastVote:
-      case GovernanceInstructionType.RelinquishVote:
-        return TransactionType.VOTE;
-
-      // Proposals
-      case GovernanceInstructionType.CreateProposal:
-      case GovernanceInstructionType.CancelProposal:
-      case GovernanceInstructionType.SignOffProposal:
-      case GovernanceInstructionType.FinalizeVote:
-      case GovernanceInstructionType.CompleteProposal:
-        return TransactionType.PROPOSAL;
-
-      default:
-        return null;
+    const typeString = GOVERNANCE_INSTRUCTION_MAP[discriminator];
+    if (typeString) {
+      return stringToTransactionType(typeString);
     }
+    // If discriminator is not in our map, still track it as OTHER_GOVERNANCE
+    // This ensures we don't miss any governance fees
+    return TransactionType.OTHER_GOVERNANCE;
   }
 
   return null;
@@ -60,6 +83,109 @@ function getTransactionTypeFromDiscriminator(
  */
 function isGovernanceProgram(programId: string): boolean {
   return programId === GOVERNANCE_PROGRAM_ID || programId === GOVERNANCE_CHAT_PROGRAM_ID;
+}
+
+/**
+ * Map governance instruction name from logs to TransactionType
+ * The governance program logs instructions like: "GOVERNANCE-INSTRUCTION: SignOffProposal"
+ */
+function mapLogInstructionToType(instructionName: string): TransactionType {
+  // Normalize the instruction name (remove spaces, handle case)
+  const normalized = instructionName.trim();
+  
+  switch (normalized) {
+    // Vote operations
+    case 'CastVote':
+    case 'RelinquishVote':
+      return TransactionType.VOTE;
+    
+    // Proposal operations
+    case 'CreateProposal':
+    case 'SignOffProposal':
+    case 'CancelProposal':
+    case 'FinalizeVote':
+    case 'CompleteProposal':
+      return TransactionType.PROPOSAL;
+    
+    // Token deposit operations
+    case 'DepositGoverningTokens':
+    case 'CreateTokenOwnerRecord':
+      return TransactionType.TOKEN_DEPOSIT;
+    
+    // Token withdrawal operations
+    case 'WithdrawGoverningTokens':
+      return TransactionType.TOKEN_WITHDRAWAL;
+    
+    // Delegate operations
+    case 'SetGovernanceDelegate':
+      return TransactionType.DELEGATE;
+    
+    // Execute operations
+    case 'ExecuteTransaction':
+      return TransactionType.EXECUTE;
+    
+    // Signatory operations
+    case 'AddSignatory':
+    case 'RemoveSignatory':
+      return TransactionType.SIGNATORY;
+    
+    // Proposal instruction operations
+    case 'InsertTransaction':
+    case 'RemoveTransaction':
+      return TransactionType.PROPOSAL_INSTRUCTION;
+    
+    // Governance admin operations
+    case 'CreateRealm':
+    case 'CreateGovernance':
+    case 'CreateProgramGovernance':
+    case 'CreateMintGovernance':
+    case 'CreateTokenGovernance':
+    case 'SetGovernanceConfig':
+    case 'FlagTransactionError':
+    case 'SetRealmAuthority':
+    case 'SetRealmConfig':
+    case 'UpdateProgramMetadata':
+    case 'CreateNativeTreasury':
+    case 'RevokeGoverningTokens':
+      return TransactionType.GOVERNANCE_ADMIN;
+    
+    // Refund operations
+    case 'RefundProposalDeposit':
+      return TransactionType.REFUND;
+    
+    // Default to OTHER_GOVERNANCE for any unrecognized instruction
+    default:
+      return TransactionType.OTHER_GOVERNANCE;
+  }
+}
+
+/**
+ * Extract governance instruction type from transaction logs
+ * The governance program logs the instruction type like: "GOVERNANCE-INSTRUCTION: SignOffProposal"
+ * This is more reliable than trying to decode instruction data discriminators
+ */
+function getInstructionTypeFromLogs(tx: ParsedTransactionWithMeta): TransactionType | null {
+  const logs = tx.meta?.logMessages || [];
+  
+  for (const log of logs) {
+    // Check for governance instruction log
+    if (log.includes('GOVERNANCE-INSTRUCTION:')) {
+      const match = log.match(/GOVERNANCE-INSTRUCTION:\s*(\w+)/);
+      if (match && match[1]) {
+        return mapLogInstructionToType(match[1]);
+      }
+    }
+  }
+  
+  // Check for chat program (comments) - they may not have the same log format
+  // Look for the chat program being invoked
+  for (const log of logs) {
+    if (log.includes(GOVERNANCE_CHAT_PROGRAM_ID) && log.includes('invoke')) {
+      return TransactionType.COMMENT;
+    }
+  }
+  
+  return null;
 }
 
 /**
@@ -111,10 +237,22 @@ function getInstructionDiscriminator(data: string | Uint8Array | Buffer): number
 
 /**
  * Determine the transaction type by analyzing instructions
+ * 
+ * Uses a multi-layered approach:
+ * 1. First, try log-based detection (most reliable - parses GOVERNANCE-INSTRUCTION logs)
+ * 2. Fall back to discriminator-based detection if logs don't contain instruction info
+ * 3. If governance program is involved but type is unknown, return OTHER_GOVERNANCE
  */
 function determineTransactionType(
   tx: ParsedTransactionWithMeta
 ): TransactionType | null {
+  // PRIMARY METHOD: Try log-based detection first (most reliable)
+  const logBasedType = getInstructionTypeFromLogs(tx);
+  if (logBasedType) {
+    return logBasedType;
+  }
+
+  // FALLBACK: Try discriminator-based detection from instruction data
   const instructions = tx.transaction.message.instructions;
 
   for (const instruction of instructions) {
@@ -148,13 +286,43 @@ function determineTransactionType(
         // This is more reliable than trying to decode the discriminator
         const parsedIx = instructionData as { [key: string]: any };
         
-        // Check for common parsed instruction formats
+        // Check for common parsed instruction formats - expanded for all types
         if ('vote' in parsedIx || 'castVote' in parsedIx || 'relinquishVote' in parsedIx) {
           return TransactionType.VOTE;
         }
-        if ('proposal' in parsedIx || 'createProposal' in parsedIx || 'cancelProposal' in parsedIx) {
+        if ('proposal' in parsedIx || 'createProposal' in parsedIx || 'cancelProposal' in parsedIx ||
+            'signOffProposal' in parsedIx || 'finalizeVote' in parsedIx || 'completeProposal' in parsedIx) {
           return TransactionType.PROPOSAL;
         }
+        if ('depositGoverningTokens' in parsedIx || 'createTokenOwnerRecord' in parsedIx) {
+          return TransactionType.TOKEN_DEPOSIT;
+        }
+        if ('withdrawGoverningTokens' in parsedIx) {
+          return TransactionType.TOKEN_WITHDRAWAL;
+        }
+        if ('setGovernanceDelegate' in parsedIx) {
+          return TransactionType.DELEGATE;
+        }
+        if ('executeTransaction' in parsedIx) {
+          return TransactionType.EXECUTE;
+        }
+        if ('addSignatory' in parsedIx || 'removeSignatory' in parsedIx) {
+          return TransactionType.SIGNATORY;
+        }
+        if ('insertTransaction' in parsedIx || 'removeTransaction' in parsedIx) {
+          return TransactionType.PROPOSAL_INSTRUCTION;
+        }
+        if ('refundProposalDeposit' in parsedIx) {
+          return TransactionType.REFUND;
+        }
+        // Admin operations
+        if ('createRealm' in parsedIx || 'createGovernance' in parsedIx || 
+            'setGovernanceConfig' in parsedIx || 'setRealmAuthority' in parsedIx ||
+            'setRealmConfig' in parsedIx || 'createNativeTreasury' in parsedIx) {
+          return TransactionType.GOVERNANCE_ADMIN;
+        }
+        // If it's a governance program but we can't identify the type, still track it
+        return TransactionType.OTHER_GOVERNANCE;
       }
     }
 
@@ -187,14 +355,44 @@ function determineTransactionType(
                   }
                 }
               } else if (typeof data === 'object') {
-                // Handle parsed inner instruction data
+                // Handle parsed inner instruction data - expanded for all types
                 const parsedIx = data as { [key: string]: any };
                 if ('vote' in parsedIx || 'castVote' in parsedIx || 'relinquishVote' in parsedIx) {
                   return TransactionType.VOTE;
                 }
-                if ('proposal' in parsedIx || 'createProposal' in parsedIx || 'cancelProposal' in parsedIx) {
+                if ('proposal' in parsedIx || 'createProposal' in parsedIx || 'cancelProposal' in parsedIx ||
+                    'signOffProposal' in parsedIx || 'finalizeVote' in parsedIx || 'completeProposal' in parsedIx) {
                   return TransactionType.PROPOSAL;
                 }
+                if ('depositGoverningTokens' in parsedIx || 'createTokenOwnerRecord' in parsedIx) {
+                  return TransactionType.TOKEN_DEPOSIT;
+                }
+                if ('withdrawGoverningTokens' in parsedIx) {
+                  return TransactionType.TOKEN_WITHDRAWAL;
+                }
+                if ('setGovernanceDelegate' in parsedIx) {
+                  return TransactionType.DELEGATE;
+                }
+                if ('executeTransaction' in parsedIx) {
+                  return TransactionType.EXECUTE;
+                }
+                if ('addSignatory' in parsedIx || 'removeSignatory' in parsedIx) {
+                  return TransactionType.SIGNATORY;
+                }
+                if ('insertTransaction' in parsedIx || 'removeTransaction' in parsedIx) {
+                  return TransactionType.PROPOSAL_INSTRUCTION;
+                }
+                if ('refundProposalDeposit' in parsedIx) {
+                  return TransactionType.REFUND;
+                }
+                // Admin operations
+                if ('createRealm' in parsedIx || 'createGovernance' in parsedIx || 
+                    'setGovernanceConfig' in parsedIx || 'setRealmAuthority' in parsedIx ||
+                    'setRealmConfig' in parsedIx || 'createNativeTreasury' in parsedIx) {
+                  return TransactionType.GOVERNANCE_ADMIN;
+                }
+                // If it's a governance program but we can't identify the type, still track it
+                return TransactionType.OTHER_GOVERNANCE;
               }
             }
           }
@@ -268,11 +466,35 @@ function calculateRentCost(
 }
 
 /**
+ * Get the fee payer address from a transaction
+ * The fee payer is always the first account in the account keys list
+ */
+function getFeePayer(tx: ParsedTransactionWithMeta): string | null {
+  const accountKeys = tx.transaction.message.accountKeys;
+  if (accountKeys.length === 0) {
+    return null;
+  }
+  
+  const firstAccount = accountKeys[0];
+  if (typeof firstAccount === 'string') {
+    return firstAccount;
+  }
+  
+  // Handle ParsedMessageAccount format
+  if (firstAccount && 'pubkey' in firstAccount) {
+    return firstAccount.pubkey.toString();
+  }
+  
+  return null;
+}
+
+/**
  * Parse a transaction and extract relevant data if it's a governance action
  * 
- * Note: We no longer check for realm involvement because transactions are now
- * fetched from realm-specific accounts (TokenOwnerRecord for votes/proposals,
- * wallet for comments filtered by chat program).
+ * This function:
+ * 1. Verifies the transaction is a governance program interaction
+ * 2. Verifies the configured wallet is the fee payer
+ * 3. Extracts transaction type, fees, and rent costs
  */
 export function parseTransaction(
   signature: string,
@@ -281,6 +503,13 @@ export function parseTransaction(
   blockTime: number
 ): TrackedTransaction | null {
   if (!tx || !tx.meta) {
+    return null;
+  }
+
+  // Verify the wallet address is the fee payer for this transaction
+  const feePayer = getFeePayer(tx);
+  if (!feePayer || feePayer !== walletAddress) {
+    // This transaction was not paid for by the configured wallet
     return null;
   }
 

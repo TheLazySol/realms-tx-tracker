@@ -65,6 +65,15 @@ export async function generateCsvReport(
     `Votes Casted,${results.votes.count},${formatSolAmount(results.votes.totalFees)} SOL`,
     `Proposals Created,${results.proposals.count},${formatSolAmount(results.proposals.totalFees)} SOL`,
     `Comments Posted,${results.comments.count},${formatSolAmount(results.comments.totalFees)} SOL`,
+    `Token Deposits,${results.tokenDeposits.count},${formatSolAmount(results.tokenDeposits.totalFees)} SOL`,
+    `Token Withdrawals,${results.tokenWithdrawals.count},${formatSolAmount(results.tokenWithdrawals.totalFees)} SOL`,
+    `Delegations,${results.delegates.count},${formatSolAmount(results.delegates.totalFees)} SOL`,
+    `Execute Transactions,${results.executes.count},${formatSolAmount(results.executes.totalFees)} SOL`,
+    `Signatory Actions,${results.signatories.count},${formatSolAmount(results.signatories.totalFees)} SOL`,
+    `Proposal Instructions,${results.proposalInstructions.count},${formatSolAmount(results.proposalInstructions.totalFees)} SOL`,
+    `Governance Admin,${results.governanceAdmin.count},${formatSolAmount(results.governanceAdmin.totalFees)} SOL`,
+    `Refunds,${results.refunds.count},${formatSolAmount(results.refunds.totalFees)} SOL`,
+    `Other Governance,${results.otherGovernance.count},${formatSolAmount(results.otherGovernance.totalFees)} SOL`,
     '',
     `Total DAO Interactions,${results.totalCount},${formatSolAmount(results.totalFees)} SOL`
   ];
@@ -89,27 +98,34 @@ function formatSolAmount(lamports: number): string {
  * Calculate tracking results from transactions
  */
 export function calculateResults(transactions: TrackedTransaction[]): TrackingResults {
-  const votes = transactions.filter(tx => tx.transactionType === TransactionType.VOTE);
-  const proposals = transactions.filter(tx => tx.transactionType === TransactionType.PROPOSAL);
-  const comments = transactions.filter(tx => tx.transactionType === TransactionType.COMMENT);
-
   const sumFees = (txs: TrackedTransaction[]) => 
     txs.reduce((sum, tx) => sum + tx.totalCost, 0);
 
+  const filterByType = (type: TransactionType) => 
+    transactions.filter(tx => tx.transactionType === type);
+
+  const createSummary = (type: TransactionType) => {
+    const txs = filterByType(type);
+    return {
+      count: txs.length,
+      totalFees: sumFees(txs)
+    };
+  };
+
   return {
     transactions,
-    votes: {
-      count: votes.length,
-      totalFees: sumFees(votes)
-    },
-    proposals: {
-      count: proposals.length,
-      totalFees: sumFees(proposals)
-    },
-    comments: {
-      count: comments.length,
-      totalFees: sumFees(comments)
-    },
+    votes: createSummary(TransactionType.VOTE),
+    proposals: createSummary(TransactionType.PROPOSAL),
+    comments: createSummary(TransactionType.COMMENT),
+    tokenDeposits: createSummary(TransactionType.TOKEN_DEPOSIT),
+    tokenWithdrawals: createSummary(TransactionType.TOKEN_WITHDRAWAL),
+    delegates: createSummary(TransactionType.DELEGATE),
+    executes: createSummary(TransactionType.EXECUTE),
+    signatories: createSummary(TransactionType.SIGNATORY),
+    proposalInstructions: createSummary(TransactionType.PROPOSAL_INSTRUCTION),
+    governanceAdmin: createSummary(TransactionType.GOVERNANCE_ADMIN),
+    refunds: createSummary(TransactionType.REFUND),
+    otherGovernance: createSummary(TransactionType.OTHER_GOVERNANCE),
     totalCount: transactions.length,
     totalFees: sumFees(transactions)
   };

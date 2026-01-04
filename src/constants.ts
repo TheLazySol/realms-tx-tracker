@@ -42,22 +42,65 @@ export const RETRY_CONFIG = {
 };
 
 /**
- * Governance instruction discriminators that we track for fees
- * Maps to TransactionType
+ * Complete governance instruction discriminator to TransactionType mapping
+ * Maps ALL governance program instructions to their transaction types
+ * 
+ * Discriminator values correspond to GovernanceInstructionType enum in types.ts
  */
-export const TRACKED_INSTRUCTIONS = {
-  // Votes
-  13: 'Vote',  // CastVote
-  15: 'Vote',  // RelinquishVote
+export const GOVERNANCE_INSTRUCTION_MAP: Record<number, string> = {
+  // Governance Admin operations
+  0: 'Governance Admin',   // CreateRealm
+  4: 'Governance Admin',   // CreateGovernance
+  5: 'Governance Admin',   // CreateProgramGovernance
+  17: 'Governance Admin',  // CreateMintGovernance
+  18: 'Governance Admin',  // CreateTokenGovernance
+  19: 'Governance Admin',  // SetGovernanceConfig
+  20: 'Governance Admin',  // FlagTransactionError
+  21: 'Governance Admin',  // SetRealmAuthority
+  22: 'Governance Admin',  // SetRealmConfig
+  24: 'Governance Admin',  // UpdateProgramMetadata
+  25: 'Governance Admin',  // CreateNativeTreasury
+  26: 'Governance Admin',  // RevokeGoverningTokens
   
-  // Proposals
-  6: 'Proposal',   // CreateProposal
-  11: 'Proposal',  // CancelProposal
-  12: 'Proposal',  // SignOffProposal
-  14: 'Proposal',  // FinalizeVote
-  28: 'Proposal',  // CompleteProposal
+  // Token Deposit operations
+  1: 'Token Deposit',      // DepositGoverningTokens
+  23: 'Token Deposit',     // CreateTokenOwnerRecord
   
-  // Comments/Messages (from chat program)
-  0: 'Comment'  // PostMessage in chat program
+  // Token Withdrawal operations
+  2: 'Token Withdrawal',   // WithdrawGoverningTokens
+  
+  // Delegate operations
+  3: 'Delegate',           // SetGovernanceDelegate
+  
+  // Proposal operations
+  6: 'Proposal',           // CreateProposal
+  11: 'Proposal',          // CancelProposal
+  12: 'Proposal',          // SignOffProposal
+  14: 'Proposal',          // FinalizeVote (finalizing vote on proposal)
+  28: 'Proposal',          // CompleteProposal
+  
+  // Signatory operations
+  7: 'Signatory',          // AddSignatory
+  8: 'Signatory',          // RemoveSignatory
+  
+  // Proposal Instruction operations
+  9: 'Proposal Instruction',   // InsertTransaction
+  10: 'Proposal Instruction',  // RemoveTransaction
+  
+  // Vote operations
+  13: 'Vote',              // CastVote
+  15: 'Vote',              // RelinquishVote
+  
+  // Execute operations
+  16: 'Execute Transaction',  // ExecuteTransaction
+  
+  // Refund operations
+  27: 'Refund',            // RefundProposalDeposit
 } as const;
+
+/**
+ * Legacy mapping for backwards compatibility
+ * @deprecated Use GOVERNANCE_INSTRUCTION_MAP instead
+ */
+export const TRACKED_INSTRUCTIONS = GOVERNANCE_INSTRUCTION_MAP;
 

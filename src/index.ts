@@ -104,7 +104,7 @@ async function main(): Promise<void> {
     // Step 4: Fetch transaction signatures from multiple sources
     // - TokenOwnerRecord: captures votes and proposals (via account signatures)
     // - VoteRecord accounts: direct query of vote records (more comprehensive)
-    // - Wallet: captures comments (chat program uses wallet directly)
+    // - Wallet: captures ALL governance interactions (comments, deposits, executes, admin ops)
     logInfo('Fetching transaction signatures...');
     
     const walletPubkey = new PublicKey(config.walletAddress);
@@ -159,8 +159,8 @@ async function main(): Promise<void> {
       }
     }
     
-    // Source 3: Fetch signatures for wallet (comments use wallet directly)
-    logInfo('  Querying wallet for comments...');
+    // Source 3: Fetch signatures for wallet (all governance interactions including comments, deposits, executes)
+    logInfo('  Querying wallet for all governance interactions...');
     const walletSignatures = await fetchSignaturesForAddress(
       connection,
       walletPubkey,
@@ -267,6 +267,7 @@ async function main(): Promise<void> {
 function displayResults(results: TrackingResults): void {
   logHeader('Transaction Fee Summary');
 
+  // Core governance actions
   logSummaryLine(
     'Votes Casted',
     results.votes.count,
@@ -285,6 +286,65 @@ function displayResults(results: TrackingResults): void {
     formatSol(results.comments.totalFees)
   );
 
+  // Token management
+  logSummaryLine(
+    'Token Deposits',
+    results.tokenDeposits.count,
+    formatSol(results.tokenDeposits.totalFees)
+  );
+
+  logSummaryLine(
+    'Token Withdrawals',
+    results.tokenWithdrawals.count,
+    formatSol(results.tokenWithdrawals.totalFees)
+  );
+
+  // Delegation
+  logSummaryLine(
+    'Delegations',
+    results.delegates.count,
+    formatSol(results.delegates.totalFees)
+  );
+
+  // Execution
+  logSummaryLine(
+    'Execute Transactions',
+    results.executes.count,
+    formatSol(results.executes.totalFees)
+  );
+
+  // Proposal management
+  logSummaryLine(
+    'Signatory Actions',
+    results.signatories.count,
+    formatSol(results.signatories.totalFees)
+  );
+
+  logSummaryLine(
+    'Proposal Instructions',
+    results.proposalInstructions.count,
+    formatSol(results.proposalInstructions.totalFees)
+  );
+
+  // Admin & other
+  logSummaryLine(
+    'Governance Admin',
+    results.governanceAdmin.count,
+    formatSol(results.governanceAdmin.totalFees)
+  );
+
+  logSummaryLine(
+    'Refunds',
+    results.refunds.count,
+    formatSol(results.refunds.totalFees)
+  );
+
+  logSummaryLine(
+    'Other Governance',
+    results.otherGovernance.count,
+    formatSol(results.otherGovernance.totalFees)
+  );
+
   logTotal(results.totalCount, formatSol(results.totalFees));
 }
 
@@ -299,10 +359,20 @@ function displayEmptyResults(config: ValidatedConfig): void {
   console.log(`    Realm: ${config.realmId}`);
   console.log();
   
-  logSummaryLine('Votes Casted', 0, '0.000000000 SOL');
-  logSummaryLine('Proposals Created', 0, '0.000000000 SOL');
-  logSummaryLine('Comments Posted', 0, '0.000000000 SOL');
-  logTotal(0, '0.000000000 SOL');
+  const zeroSol = '0.000000000 SOL';
+  logSummaryLine('Votes Casted', 0, zeroSol);
+  logSummaryLine('Proposals Created', 0, zeroSol);
+  logSummaryLine('Comments Posted', 0, zeroSol);
+  logSummaryLine('Token Deposits', 0, zeroSol);
+  logSummaryLine('Token Withdrawals', 0, zeroSol);
+  logSummaryLine('Delegations', 0, zeroSol);
+  logSummaryLine('Execute Transactions', 0, zeroSol);
+  logSummaryLine('Signatory Actions', 0, zeroSol);
+  logSummaryLine('Proposal Instructions', 0, zeroSol);
+  logSummaryLine('Governance Admin', 0, zeroSol);
+  logSummaryLine('Refunds', 0, zeroSol);
+  logSummaryLine('Other Governance', 0, zeroSol);
+  logTotal(0, zeroSol);
 }
 
 /**

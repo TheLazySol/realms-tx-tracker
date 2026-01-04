@@ -29,10 +29,33 @@ export interface ValidatedConfig {
  * Transaction type categories for governance actions
  */
 export enum TransactionType {
+  // Core governance actions
   VOTE = 'Vote',
   PROPOSAL = 'Proposal',
   COMMENT = 'Comment',
-  OTHER = 'Other'
+  
+  // Token management
+  TOKEN_DEPOSIT = 'Token Deposit',
+  TOKEN_WITHDRAWAL = 'Token Withdrawal',
+  
+  // Delegation
+  DELEGATE = 'Delegate',
+  
+  // Proposal execution
+  EXECUTE = 'Execute Transaction',
+  
+  // Proposal management
+  SIGNATORY = 'Signatory',
+  PROPOSAL_INSTRUCTION = 'Proposal Instruction',
+  
+  // Administrative
+  GOVERNANCE_ADMIN = 'Governance Admin',
+  
+  // Refunds
+  REFUND = 'Refund',
+  
+  // Fallback for any unrecognized governance instruction
+  OTHER_GOVERNANCE = 'Other Governance'
 }
 
 /**
@@ -103,6 +126,15 @@ export interface TrackingResults {
   votes: CategorySummary;
   proposals: CategorySummary;
   comments: CategorySummary;
+  tokenDeposits: CategorySummary;
+  tokenWithdrawals: CategorySummary;
+  delegates: CategorySummary;
+  executes: CategorySummary;
+  signatories: CategorySummary;
+  proposalInstructions: CategorySummary;
+  governanceAdmin: CategorySummary;
+  refunds: CategorySummary;
+  otherGovernance: CategorySummary;
   totalCount: number;
   totalFees: number; // in lamports
 }
